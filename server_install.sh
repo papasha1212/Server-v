@@ -30,12 +30,10 @@ install_deps() {
 
 download_install_script() {
   rm -f "${INSTALL_SCRIPT}"
-
   local urls=(
     "https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
     "https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
   )
-
   for url in "${urls[@]}"; do
     if curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 "$url" -o "${INSTALL_SCRIPT}"; then
       if head -n 1 "${INSTALL_SCRIPT}" | grep -q '^#!'; then
@@ -44,9 +42,7 @@ download_install_script() {
       fi
     fi
   done
-
-  printf '%s\n' "Не удалось скачать корректный install-release.sh."
-  printf '%s\n' "Скорее всего, вместо скрипта получен HTML/страница ошибки."
+  printf '%s\n' "Не удалось скачать корректный install-release.sh." >&2
   exit 1
 }
 
@@ -62,16 +58,15 @@ gen_uuid() {
 
 gen_x25519() {
   local out private_key public_key
-  out="$(xray x25519)"
+  out="$(xray x25519 2>&1)"
   private_key="$(echo "$out" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')"
   public_key="$(echo "$out" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')"
-
+  
   if [[ -z "${private_key}" || -z "${public_key}" ]]; then
-    printf '%s\n' "Не удалось распарсить xray x25519."
-    printf '%s\n' "$out"
+    printf '%s\n' "Не удалось распарсить xray x25519:" >&2
+    printf '%s\n' "$out" >&2
     exit 1
   fi
-
   printf '%s;%s\n' "$private_key" "$public_key"
 }
 
@@ -86,10 +81,9 @@ write_config() {
 
   mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_LOG_DIR}"
   touch "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
-
   chmod 644 "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
   chmod 700 "${XRAY_CONFIG_DIR}"
-  chmod 600 "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log" || true
+  chmod 600 "${XRAY_LOG_DIR}"/*.log 2>/dev/null || true
 
   cat > "${XRAY_CONFIG_FILE}" <<EOF
 {
@@ -120,56 +114,35 @@ write_config() {
         },
         "realitySettings": {
           "dest": "${DEST_HOST}:${DEST_PORT}",
-          "serverNames": [
-            "${SNI}"
-          ],
+          "serverNames": ["${SNI}"],
           "privateKey": "${private_key}",
-          "shortIds": [
-            "${short_id}"
-          ]
+          "shortIds": ["${short_id}"]
         }
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ],
+        "destOverride": ["http", "tls", "quic"],
         "routeOnly": true
       }
     }
   ],
   "outbounds": [
-    {
-      "protocol": "freedom",
-      "tag": "direct"
-    },
-    {
-      "protocol": "blackhole",
-      "tag": "blocked"
-    }
+    { "protocol": "freedom", "tag": "direct" },
+    { "protocol": "blackhole", "tag": "blocked" }
   ],
   "routing": {
     "domainStrategy": "AsIs",
     "rules": [
-      {
-        "ip": [
-          "geoip:private"
-        ],
-        "outboundTag": "blocked"
-      }
+      { "ip": ["geoip:private"], "outboundTag": "blocked" }
     ]
   }
 }
 EOF
-
   chmod 600 "${XRAY_CONFIG_FILE}"
 }
 
 print_config() {
-  printf '\n'
-  printf '%s\n' "===== FULL CONFIG: ${XRAY_CONFIG_FILE} ====="
+  printf '\n%s\n' "===== FULL CONFIG: ${XRAY_CONFIG_FILE} ====="
   cat "${XRAY_CONFIG_FILE}"
   printf '%s\n' "===== END CONFIG ====="
   printf '\n'
@@ -177,18 +150,19 @@ print_config() {
 
 validate_and_restart() {
   systemctl daemon-reload || true
-
+  
   if ! systemctl list-unit-files | grep -q '^xray\.service'; then
-    printf '%s\n' "systemd unit xray.service не найден. Проверь установку."
+    printf '%s\n' "systemd unit xray.service не найден. Проверь установку." >&2
     exit 1
   fi
 
-  systemctl enable xray
+  systemctl enable xray --now >/dev/null 2>&1 || true
 
   if xray run -test -config "${XRAY_CONFIG_FILE}"; then
     systemctl restart xray
+    printf '%s\n' "Xray успешно перезапущен."
   else
-    printf '%s\n' "Конфиг не прошёл проверку."
+    printf '%s\n' "Конфиг не прошёл проверку xray run -test!" >&2
     exit 1
   fi
 }
@@ -197,6 +171,30 @@ open_firewall() {
   ufw allow 22/tcp || true
   ufw allow "${PORT}/tcp" || true
   ufw --force enable || true
+}
+
+print_final_info() {
+  local uuid="$1"
+  local private_key="$2"
+  local public_key="$3"
+  local short_id="$4"
+  local vless_url="$5"
+
+  print_config
+
+  printf '%s\n' "Готово."
+  printf '%s\n' "UUID: ${uuid}"
+  printf '%s\n' "PrivateKey: ${private_key}"
+  printf '%s\n' "PublicKey: ${public_key}"
+  printf '%s\n' "ShortID: ${short_id}"
+  printf '%s\n' "Config: ${XRAY_CONFIG_FILE}"
+  printf '%s\n' "Link:"
+  printf '%s\n' "${vless_url}"
+  printf '\n'
+  printf '%s\n' "Проверка:"
+  printf '%s\n' "  systemctl status xray --no-pager"
+  printf '%s\n' "  journalctl -u xray -e --no-pager"
+  printf '\n'
 }
 
 main() {
@@ -210,25 +208,14 @@ main() {
   PUBLIC_KEY="${KEY_PAIR##*;}"
   SHORT_ID="$(gen_short_id)"
 
+  VLESS_URL="vless://${UUID}@${DEST_HOST}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=%2F${PATH_NAME}&mode=stream-one#${TAG}"
+
   write_config "${UUID}" "${PRIVATE_KEY}" "${SHORT_ID}"
   open_firewall
   validate_and_restart
-  print_config
 
-  VLESS_URL="vless://${UUID}@${DEST_HOST}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=%2F${PATH_NAME}&mode=stream-one#${TAG}"
-
-  printf '%s\n' "Готово."
-  printf '%s\n' "UUID:       ${UUID}"
-  printf '%s\n' "PrivateKey: ${PRIVATE_KEY}"
-  printf '%s\n' "PublicKey:  ${PUBLIC_KEY}"
-  printf '%s\n' "ShortID:    ${SHORT_ID}"
-  printf '%s\n' "Config:     ${XRAY_CONFIG_FILE}"
-  printf '%s\n' "Link:"
-  printf '%s\n' "${VLESS_URL}"
-  printf '\n'
-  printf '%s\n' "Проверка:"
-  printf '%s\n' "systemctl status xray --no-pager"
-  printf '%s\n' "journalctl -u xray -e --no-pager"
+  # Главный вывод в конце — теперь он почти гарантированно будет
+  print_final_info "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${SHORT_ID}" "${VLESS_URL}"
 }
 
 main "$@"
