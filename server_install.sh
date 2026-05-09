@@ -17,7 +17,7 @@ INSTALL_SCRIPT="/tmp/install-release.sh"
 
 need_root() {
   if [[ "${EUID}" -ne 0 ]]; then
-    echo "Запусти скрипт от root: sudo bash $0"
+    printf '%s\n' "Запусти скрипт от root: sudo bash $0"
     exit 1
   fi
 }
@@ -45,8 +45,8 @@ download_install_script() {
     fi
   done
 
-  echo "Не удалось скачать корректный install-release.sh."
-  echo "Скорее всего, вместо скрипта получен HTML/страница ошибки."
+  printf '%s\n' "Не удалось скачать корректный install-release.sh."
+  printf '%s\n' "Скорее всего, вместо скрипта получен HTML/страница ошибки."
   exit 1
 }
 
@@ -67,8 +67,8 @@ gen_x25519() {
   public_key="$(echo "$out" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')"
 
   if [[ -z "${private_key}" || -z "${public_key}" ]]; then
-    echo "Не удалось распарсить xray x25519."
-    echo "$out"
+    printf '%s\n' "Не удалось распарсить xray x25519."
+    printf '%s\n' "$out"
     exit 1
   fi
 
@@ -168,18 +168,18 @@ EOF
 }
 
 print_config() {
-  echo
-  echo "===== FULL CONFIG: ${XRAY_CONFIG_FILE} ====="
+  printf '\n'
+  printf '%s\n' "===== FULL CONFIG: ${XRAY_CONFIG_FILE} ====="
   cat "${XRAY_CONFIG_FILE}"
-  echo "===== END CONFIG ====="
-  echo
+  printf '%s\n' "===== END CONFIG ====="
+  printf '\n'
 }
 
 validate_and_restart() {
   systemctl daemon-reload || true
 
   if ! systemctl list-unit-files | grep -q '^xray\.service'; then
-    echo "systemd unit xray.service не найден. Проверь установку."
+    printf '%s\n' "systemd unit xray.service не найден. Проверь установку."
     exit 1
   fi
 
@@ -188,7 +188,7 @@ validate_and_restart() {
   if xray run -test -config "${XRAY_CONFIG_FILE}"; then
     systemctl restart xray
   else
-    echo "Конфиг не прошёл проверку."
+    printf '%s\n' "Конфиг не прошёл проверку."
     exit 1
   fi
 }
@@ -217,18 +217,18 @@ main() {
 
   VLESS_URL="vless://${UUID}@${DEST_HOST}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=%2F${PATH_NAME}&mode=stream-one#${TAG}"
 
-  echo "Готово."
-  echo "UUID:       ${UUID}"
-  echo "PrivateKey: ${PRIVATE_KEY}"
-  echo "PublicKey:  ${PUBLIC_KEY}"
-  echo "ShortID:    ${SHORT_ID}"
-  echo "Config:     ${XRAY_CONFIG_FILE}"
-  echo "Link:"
-  echo "${VLESS_URL}"
-  echo
-  echo "Проверка:"
-  echo "systemctl status xray --no-pager"
-  echo "journalctl -u xray -e --no-pager"
+  printf '%s\n' "Готово."
+  printf '%s\n' "UUID:       ${UUID}"
+  printf '%s\n' "PrivateKey: ${PRIVATE_KEY}"
+  printf '%s\n' "PublicKey:  ${PUBLIC_KEY}"
+  printf '%s\n' "ShortID:    ${SHORT_ID}"
+  printf '%s\n' "Config:     ${XRAY_CONFIG_FILE}"
+  printf '%s\n' "Link:"
+  printf '%s\n' "${VLESS_URL}"
+  printf '\n'
+  printf '%s\n' "Проверка:"
+  printf '%s\n' "systemctl status xray --no-pager"
+  printf '%s\n' "journalctl -u xray -e --no-pager"
 }
 
 main "$@"
