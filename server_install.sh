@@ -59,7 +59,7 @@ install_xray() {
   printf '%s\n' "Запуск установки Xray..."
   bash "${INSTALL_SCRIPT}" install
   rm -f "${INSTALL_SCRIPT}"
-  sleep 2
+  sleep 3
   hash -r || true
   printf '%s\n' "Xray установлен (версия: $(xray version 2>&1 | head -n1 || echo unknown))"
 }
@@ -71,14 +71,25 @@ gen_uuid() {
 gen_x25519() {
   local out private_key public_key
   out="$(xray x25519 2>&1)"
-  private_key="$(echo "$out" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')"
-  public_key="$(echo "$out" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')"
- 
+
+  # Новый формат Xray v25.3.6+ (PrivateKey / Password)
+  private_key="$(echo "$out" | grep -i 'PrivateKey:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
+  public_key="$(echo "$out" | grep -iE 'Password:|Public key:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
+
+  # Старый формат (fallback)
+  if [[ -z "$private_key" ]]; then
+    private_key="$(echo "$out" | grep -i 'Private key:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
+  fi
+  if [[ -z "$public_key" ]]; then
+    public_key="$(echo "$out" | grep -i 'Public key:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
+  fi
+
   if [[ -z "${private_key}" || -z "${public_key}" ]]; then
-    printf '%s\n' "Не удалось распарсить xray x25519:" >&2
+    printf '%s\n' "Не удалось распарсить xray x25519 (новый формат?):" >&2
     printf '%s\n' "$out" >&2
     exit 1
   fi
+
   printf '%s;%s\n' "$private_key" "$public_key"
 }
 
@@ -232,7 +243,6 @@ main() {
   write_config "${UUID}" "${PRIVATE_KEY}" "${SHORT_ID}"
   open_firewall
 
-  # ←←← КРИТИЧНО: продолжаем даже если валидация упала
   validate_and_restart || printf '%s\n' "Валидация конфига не прошла, но продолжаем вывод результата..."
 
   print_final_info "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${SHORT_ID}" "${VLESS_URL}"
