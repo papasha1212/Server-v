@@ -61,7 +61,7 @@ gen_x25519() {
   out="$(xray x25519 2>&1)"
   private_key="$(echo "$out" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')"
   public_key="$(echo "$out" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')"
-  
+ 
   if [[ -z "${private_key}" || -z "${public_key}" ]]; then
     printf '%s\n' "Не удалось распарсить xray x25519:" >&2
     printf '%s\n' "$out" >&2
@@ -138,10 +138,21 @@ write_config() {
   }
 }
 EOF
+
+  if [[ ! -s "${XRAY_CONFIG_FILE}" ]]; then
+    printf '%s\n' "ОШИБКА: config.json не был создан или пустой!" >&2
+    exit 1
+  fi
+
   chmod 600 "${XRAY_CONFIG_FILE}"
+  printf '%s\n' "Конфиг успешно записан: ${XRAY_CONFIG_FILE}"
 }
 
 print_config() {
+  if [[ ! -f "${XRAY_CONFIG_FILE}" ]]; then
+    printf '%s\n' "ОШИБКА: Файл конфига ${XRAY_CONFIG_FILE} не найден!" >&2
+    return 1
+  fi
   printf '\n%s\n' "===== FULL CONFIG: ${XRAY_CONFIG_FILE} ====="
   cat "${XRAY_CONFIG_FILE}"
   printf '%s\n' "===== END CONFIG ====="
@@ -150,7 +161,7 @@ print_config() {
 
 validate_and_restart() {
   systemctl daemon-reload || true
-  
+ 
   if ! systemctl list-unit-files | grep -q '^xray\.service'; then
     printf '%s\n' "systemd unit xray.service не найден. Проверь установку." >&2
     exit 1
@@ -158,7 +169,9 @@ validate_and_restart() {
 
   systemctl enable xray --now >/dev/null 2>&1 || true
 
+  printf '%s\n' "Выполняется проверка конфига..."
   if xray run -test -config "${XRAY_CONFIG_FILE}"; then
+    printf '%s\n' "Конфиг валидный. Перезапускаем Xray..."
     systemctl restart xray
     printf '%s\n' "Xray успешно перезапущен."
   else
@@ -214,7 +227,6 @@ main() {
   open_firewall
   validate_and_restart
 
-  # Главный вывод в конце — теперь он почти гарантированно будет
   print_final_info "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${SHORT_ID}" "${VLESS_URL}"
 }
 
