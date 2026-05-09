@@ -61,7 +61,7 @@ install_xray() {
   rm -f "${INSTALL_SCRIPT}"
   sleep 2
   hash -r || true
-  printf '%s\n' "Xray установлен."
+  printf '%s\n' "Xray установлен (версия: $(xray version 2>&1 | head -n1 || echo unknown))"
 }
 
 gen_uuid() {
@@ -176,20 +176,21 @@ validate_and_restart() {
   systemctl daemon-reload || true
   if ! systemctl list-unit-files | grep -q '^xray\.service'; then
     printf '%s\n' "systemd unit xray.service не найден!" >&2
-    exit 1
+    return 1
   fi
 
   systemctl enable xray --now >/dev/null 2>&1 || true
 
   printf '%s\n' "Выполняется проверка конфига (xray run -test)..."
-  if ! xray run -test -config "${XRAY_CONFIG_FILE}"; then
+  if xray run -test -config "${XRAY_CONFIG_FILE}"; then
+    printf '%s\n' "Конфиг валидный. Перезапускаем Xray..."
+    systemctl restart xray
+    printf '%s\n' "Xray успешно перезапущен."
+    return 0
+  else
     printf '%s\n' "=== КОНФИГ НЕ ПРОШЁЛ ВАЛИДАЦИЮ! ===" >&2
-    exit 1
+    return 1
   fi
-
-  printf '%s\n' "Конфиг валидный. Перезапускаем Xray..."
-  systemctl restart xray
-  printf '%s\n' "Xray успешно перезапущен."
 }
 
 open_firewall() {
@@ -207,6 +208,7 @@ print_final_info() {
 
   print_config
 
+  printf '%s\n' "=== ИТОГОВАЯ ИНФОРМАЦИЯ ==="
   printf '%s\n' "Готово."
   printf '%s\n' "UUID: ${uuid}"
   printf '%s\n' "PrivateKey: ${private_key}"
@@ -216,6 +218,7 @@ print_final_info() {
   printf '%s\n' "Link:"
   printf '%s\n' "${vless_url}"
   printf '\nПроверка:\n  systemctl status xray --no-pager\n  journalctl -u xray -e --no-pager\n'
+  printf '%s\n' "=== Лог установки: ${LOG_FILE} ==="
 }
 
 main() {
@@ -233,11 +236,13 @@ main() {
 
   write_config "${UUID}" "${PRIVATE_KEY}" "${SHORT_ID}"
   open_firewall
-  validate_and_restart
+
+  # Запускаем валидацию, но продолжаем в любом случае
+  if ! validate_and_restart; then
+    printf '%s\n' "Валидация не прошла, но выводим итоговые данные всё равно."
+  fi
 
   print_final_info "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${SHORT_ID}" "${VLESS_URL}"
-
-  printf '%s\n' "=== Установка завершена. Лог сохранён: ${LOG_FILE} ==="
 }
 
 main "$@"
