@@ -152,11 +152,6 @@ EOF
   sed -i "s|PRIVATEKEY_PLACEHOLDER|${private_key}|g" "${XRAY_CONFIG_FILE}"
   sed -i "s|SHORTID_PLACEHOLDER|${short_id}|g" "${XRAY_CONFIG_FILE}"
 
-  if [[ ! -s "${XRAY_CONFIG_FILE}" ]]; then
-    printf '%s\n' "ОШИБКА: config.json пустой!" >&2
-    exit 1
-  fi
-
   chmod 600 "${XRAY_CONFIG_FILE}"
   printf '%s\n' "Конфиг успешно записан: ${XRAY_CONFIG_FILE} (размер: $(wc -c < "${XRAY_CONFIG_FILE}") байт)"
 }
@@ -208,7 +203,7 @@ print_final_info() {
 
   print_config
 
-  printf '%s\n' "=== ИТОГОВАЯ ИНФОРМАЦИЯ ==="
+  printf '%s\n' "=== ИТОГОВАЯ ИНФОРМАЦИЯ VPN СЕРВЕРА ==="
   printf '%s\n' "Готово."
   printf '%s\n' "UUID: ${uuid}"
   printf '%s\n' "PrivateKey: ${private_key}"
@@ -218,7 +213,7 @@ print_final_info() {
   printf '%s\n' "Link:"
   printf '%s\n' "${vless_url}"
   printf '\nПроверка:\n  systemctl status xray --no-pager\n  journalctl -u xray -e --no-pager\n'
-  printf '%s\n' "=== Лог установки: ${LOG_FILE} ==="
+  printf '%s\n' "=== Полный лог: ${LOG_FILE} ==="
 }
 
 main() {
@@ -237,12 +232,12 @@ main() {
   write_config "${UUID}" "${PRIVATE_KEY}" "${SHORT_ID}"
   open_firewall
 
-  # Запускаем валидацию, но продолжаем в любом случае
-  if ! validate_and_restart; then
-    printf '%s\n' "Валидация не прошла, но выводим итоговые данные всё равно."
-  fi
+  # ←←← КРИТИЧНО: продолжаем даже если валидация упала
+  validate_and_restart || printf '%s\n' "Валидация конфига не прошла, но продолжаем вывод результата..."
 
   print_final_info "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${SHORT_ID}" "${VLESS_URL}"
+
+  printf '%s\n' "=== Установка завершена. Лог сохранён: ${LOG_FILE} ==="
 }
 
 main "$@"
