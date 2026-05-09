@@ -50,6 +50,9 @@ install_xray() {
   download_install_script
   bash "${INSTALL_SCRIPT}" install
   rm -f "${INSTALL_SCRIPT}"
+  # Критично: ждём, пока xray попадёт в PATH
+  sleep 2
+  hash -r || true
 }
 
 gen_uuid() {
@@ -61,7 +64,7 @@ gen_x25519() {
   out="$(xray x25519 2>&1)"
   private_key="$(echo "$out" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')"
   public_key="$(echo "$out" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')"
- 
+  
   if [[ -z "${private_key}" || -z "${public_key}" ]]; then
     printf '%s\n' "Не удалось распарсить xray x25519:" >&2
     printf '%s\n' "$out" >&2
@@ -85,21 +88,21 @@ write_config() {
   chmod 700 "${XRAY_CONFIG_DIR}"
   chmod 600 "${XRAY_LOG_DIR}"/*.log 2>/dev/null || true
 
-  cat > "${XRAY_CONFIG_FILE}" <<EOF
+  cat > "${XRAY_CONFIG_FILE}" <<'EOF'
 {
   "log": {
-    "loglevel": "${LOG_LEVEL}",
-    "access": "${XRAY_LOG_DIR}/access.log",
-    "error": "${XRAY_LOG_DIR}/error.log"
+    "loglevel": "warning",
+    "access": "/var/log/xray/access.log",
+    "error": "/var/log/xray/error.log"
   },
   "inbounds": [
     {
-      "port": ${PORT},
+      "port": PORT_PLACEHOLDER,
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "id": "${uuid}",
+            "id": "UUID_PLACEHOLDER",
             "level": 0
           }
         ],
@@ -110,13 +113,13 @@ write_config() {
         "security": "reality",
         "xhttpSettings": {
           "mode": "stream-one",
-          "path": "/${PATH_NAME}"
+          "path": "/PATH_PLACEHOLDER"
         },
         "realitySettings": {
-          "dest": "${DEST_HOST}:${DEST_PORT}",
-          "serverNames": ["${SNI}"],
-          "privateKey": "${private_key}",
-          "shortIds": ["${short_id}"]
+          "dest": "DEST_PLACEHOLDER",
+          "serverNames": ["SNI_PLACEHOLDER"],
+          "privateKey": "PRIVATEKEY_PLACEHOLDER",
+          "shortIds": ["SHORTID_PLACEHOLDER"]
         }
       },
       "sniffing": {
@@ -139,18 +142,27 @@ write_config() {
 }
 EOF
 
+  # Безопасная подстановка (избегаем проблем с heredoc + переменными)
+  sed -i "s/PORT_PLACEHOLDER/${PORT}/g" "${XRAY_CONFIG_FILE}"
+  sed -i "s|UUID_PLACEHOLDER|${uuid}|g" "${XRAY_CONFIG_FILE}"
+  sed -i "s|PATH_PLACEHOLDER|${PATH_NAME}|g" "${XRAY_CONFIG_FILE}"
+  sed -i "s|DEST_PLACEHOLDER|${DEST_HOST}:${DEST_PORT}|g" "${XRAY_CONFIG_FILE}"
+  sed -i "s|SNI_PLACEHOLDER|${SNI}|g" "${XRAY_CONFIG_FILE}"
+  sed -i "s|PRIVATEKEY_PLACEHOLDER|${private_key}|g" "${XRAY_CONFIG_FILE}"
+  sed -i "s|SHORTID_PLACEHOLDER|${short_id}|g" "${XRAY_CONFIG_FILE}"
+
   if [[ ! -s "${XRAY_CONFIG_FILE}" ]]; then
-    printf '%s\n' "ОШИБКА: config.json не был создан или пустой!" >&2
+    printf '%s\n' "ОШИБКА: config.json пустой!" >&2
     exit 1
   fi
 
   chmod 600 "${XRAY_CONFIG_FILE}"
-  printf '%s\n' "Конфиг успешно записан: ${XRAY_CONFIG_FILE}"
+  printf '%s\n' "Конфиг успешно записан: ${XRAY_CONFIG_FILE} (размер: $(wc -c < "${XRAY_CONFIG_FILE}") байт)"
 }
 
 print_config() {
   if [[ ! -f "${XRAY_CONFIG_FILE}" ]]; then
-    printf '%s\n' "ОШИБКА: Файл конфига ${XRAY_CONFIG_FILE} не найден!" >&2
+    printf '%s\n' "ОШИБКА: Файл конфига не найден!" >&2
     return 1
   fi
   printf '\n%s\n' "===== FULL CONFIG: ${XRAY_CONFIG_FILE} ====="
@@ -161,23 +173,24 @@ print_config() {
 
 validate_and_restart() {
   systemctl daemon-reload || true
- 
+
   if ! systemctl list-unit-files | grep -q '^xray\.service'; then
-    printf '%s\n' "systemd unit xray.service не найден. Проверь установку." >&2
+    printf '%s\n' "systemd unit xray.service не найден!" >&2
     exit 1
   fi
 
   systemctl enable xray --now >/dev/null 2>&1 || true
 
-  printf '%s\n' "Выполняется проверка конфига..."
-  if xray run -test -config "${XRAY_CONFIG_FILE}"; then
-    printf '%s\n' "Конфиг валидный. Перезапускаем Xray..."
-    systemctl restart xray
-    printf '%s\n' "Xray успешно перезапущен."
-  else
-    printf '%s\n' "Конфиг не прошёл проверку xray run -test!" >&2
+  printf '%s\n' "Выполняется проверка конфига (xray run -test)..."
+  if ! xray run -test -config "${XRAY_CONFIG_FILE}"; then
+    printf '%s\n' "=== КОНФИГ НЕ ПРОШЁЛ ВАЛИДАЦИЮ! ===" >&2
+    printf '%s\n' "Проверь логи ошибки выше." >&2
     exit 1
   fi
+
+  printf '%s\n' "Конфиг валидный. Перезапускаем Xray..."
+  systemctl restart xray
+  printf '%s\n' "Xray успешно перезапущен."
 }
 
 open_firewall() {
@@ -203,11 +216,7 @@ print_final_info() {
   printf '%s\n' "Config: ${XRAY_CONFIG_FILE}"
   printf '%s\n' "Link:"
   printf '%s\n' "${vless_url}"
-  printf '\n'
-  printf '%s\n' "Проверка:"
-  printf '%s\n' "  systemctl status xray --no-pager"
-  printf '%s\n' "  journalctl -u xray -e --no-pager"
-  printf '\n'
+  printf '\nПроверка:\n  systemctl status xray --no-pager\n  journalctl -u xray -e --no-pager\n'
 }
 
 main() {
