@@ -13,6 +13,7 @@ LOG_LEVEL="${LOG_LEVEL:-warning}"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_LOG_DIR="/var/log/xray"
+INSTALL_SCRIPT="/tmp/install-release.sh"
 
 need_root() {
   if [[ "${EUID}" -ne 0 ]]; then
@@ -27,14 +28,32 @@ install_deps() {
   apt-get install -y curl unzip openssl ca-certificates ufw
 }
 
-install_xray() {
-  # Официальный installer Xray
-  curl -fsSL \
-    https://github.com/XTLS/Xray-install/raw/main/install-release.sh \
-    -o /tmp/install-release.sh
+download_install_script() {
+  rm -f "${INSTALL_SCRIPT}"
 
-  bash /tmp/install-release.sh install
-  rm -f /tmp/install-release.sh
+  local urls=(
+    "https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
+    "https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
+  )
+
+  for url in "${urls[@]}"; do
+    if curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 "$url" -o "${INSTALL_SCRIPT}"; then
+      if head -n 1 "${INSTALL_SCRIPT}" | grep -q '^#!'; then
+        chmod +x "${INSTALL_SCRIPT}"
+        return 0
+      fi
+    fi
+  done
+
+  echo "Не удалось скачать корректный install-release.sh."
+  echo "Скорее всего, вместо скрипта получен HTML/страница ошибки."
+  exit 1
+}
+
+install_xray() {
+  download_install_script
+  bash "${INSTALL_SCRIPT}" install
+  rm -f "${INSTALL_SCRIPT}"
 }
 
 gen_uuid() {
@@ -42,9 +61,6 @@ gen_uuid() {
 }
 
 gen_x25519() {
-  # Ожидаемый формат вывода:
-  # Private key: xxxx
-  # Public key: yyyy
   local out private_key public_key
   out="$(xray x25519)"
   private_key="$(echo "$out" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')"
@@ -60,7 +76,6 @@ gen_x25519() {
 }
 
 gen_short_id() {
-  # 8 hex символов = допустимая длина, кратная 2, в рамках лимита до 16
   openssl rand -hex 4
 }
 
@@ -71,8 +86,6 @@ write_config() {
 
   mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_LOG_DIR}"
   touch "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
-
-  # Права на логи — без лишней экзотики, чтобы сервис не упирался в permissions
   chmod 644 "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
 
   cat > "${XRAY_CONFIG_FILE}" <<EOF
@@ -151,16 +164,18 @@ EOF
 
 validate_and_restart() {
   systemctl daemon-reload || true
-  if systemctl list-unit-files | grep -q '^xray\.service'; then
-    systemctl enable xray
-    if xray run -test -config "${XRAY_CONFIG_FILE}"; then
-      systemctl restart xray
-    else
-      echo "Конфиг не прошёл проверку."
-      exit 1
-    fi
-  else
+
+  if ! systemctl list-unit-files | grep -q '^xray\.service'; then
     echo "systemd unit xray.service не найден. Проверь установку."
+    exit 1
+  fi
+
+  systemctl enable xray
+
+  if xray run -test -config "${XRAY_CONFIG_FILE}"; then
+    systemctl restart xray
+  else
+    echo "Конфиг не прошёл проверку."
     exit 1
   fi
 }
@@ -186,15 +201,15 @@ main() {
   open_firewall
   validate_and_restart
 
-  VLESS_URL="vless://${UUID}@${DEST_HOST}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=%2F${PATH_NAME}#${TAG}"
+  VLESS_URL="vless://${UUID}@${DEST_HOST}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=%2F${PATH_NAME}&mode=stream-one#${TAG}"
 
   echo
   echo "Готово."
-  echo "UUID:        ${UUID}"
-  echo "PrivateKey:   ${PRIVATE_KEY}"
-  echo "PublicKey:    ${PUBLIC_KEY}"
-  echo "ShortID:      ${SHORT_ID}"
-  echo "Config:       ${XRAY_CONFIG_FILE}"
+  echo "UUID:       ${UUID}"
+  echo "PrivateKey: ${PRIVATE_KEY}"
+  echo "PublicKey:  ${PUBLIC_KEY}"
+  echo "ShortID:    ${SHORT_ID}"
+  echo "Config:     ${XRAY_CONFIG_FILE}"
   echo "Link:"
   echo "${VLESS_URL}"
   echo
