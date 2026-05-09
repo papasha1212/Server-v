@@ -15,6 +15,13 @@ XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_LOG_DIR="/var/log/xray"
 INSTALL_SCRIPT="/tmp/install-release.sh"
 
+# ====================== ЛОГИРОВАНИЕ ======================
+LOG_FILE="/var/log/xray-install.log"
+exec > >(tee -a "${LOG_FILE}")
+exec 2>&1
+
+printf '%s\n' "=== Xray Reality (xhttp) установка начата: $(date) ==="
+
 need_root() {
   if [[ "${EUID}" -ne 0 ]]; then
     printf '%s\n' "Запусти скрипт от root: sudo bash $0"
@@ -24,6 +31,7 @@ need_root() {
 
 install_deps() {
   export DEBIAN_FRONTEND=noninteractive
+  printf '%s\n' "Установка зависимостей..."
   apt-get update -y
   apt-get install -y curl unzip openssl ca-certificates ufw
 }
@@ -48,11 +56,12 @@ download_install_script() {
 
 install_xray() {
   download_install_script
+  printf '%s\n' "Запуск установки Xray..."
   bash "${INSTALL_SCRIPT}" install
   rm -f "${INSTALL_SCRIPT}"
-  # Критично: ждём, пока xray попадёт в PATH
   sleep 2
   hash -r || true
+  printf '%s\n' "Xray установлен."
 }
 
 gen_uuid() {
@@ -64,7 +73,7 @@ gen_x25519() {
   out="$(xray x25519 2>&1)"
   private_key="$(echo "$out" | awk -F': ' '/Private key/ {print $2}' | tr -d '\r')"
   public_key="$(echo "$out" | awk -F': ' '/Public key/ {print $2}' | tr -d '\r')"
-  
+ 
   if [[ -z "${private_key}" || -z "${public_key}" ]]; then
     printf '%s\n' "Не удалось распарсить xray x25519:" >&2
     printf '%s\n' "$out" >&2
@@ -100,12 +109,7 @@ write_config() {
       "port": PORT_PLACEHOLDER,
       "protocol": "vless",
       "settings": {
-        "clients": [
-          {
-            "id": "UUID_PLACEHOLDER",
-            "level": 0
-          }
-        ],
+        "clients": [{ "id": "UUID_PLACEHOLDER", "level": 0 }],
         "decryption": "none"
       },
       "streamSettings": {
@@ -135,14 +139,11 @@ write_config() {
   ],
   "routing": {
     "domainStrategy": "AsIs",
-    "rules": [
-      { "ip": ["geoip:private"], "outboundTag": "blocked" }
-    ]
+    "rules": [{ "ip": ["geoip:private"], "outboundTag": "blocked" }]
   }
 }
 EOF
 
-  # Безопасная подстановка (избегаем проблем с heredoc + переменными)
   sed -i "s/PORT_PLACEHOLDER/${PORT}/g" "${XRAY_CONFIG_FILE}"
   sed -i "s|UUID_PLACEHOLDER|${uuid}|g" "${XRAY_CONFIG_FILE}"
   sed -i "s|PATH_PLACEHOLDER|${PATH_NAME}|g" "${XRAY_CONFIG_FILE}"
@@ -173,7 +174,6 @@ print_config() {
 
 validate_and_restart() {
   systemctl daemon-reload || true
-
   if ! systemctl list-unit-files | grep -q '^xray\.service'; then
     printf '%s\n' "systemd unit xray.service не найден!" >&2
     exit 1
@@ -184,7 +184,6 @@ validate_and_restart() {
   printf '%s\n' "Выполняется проверка конфига (xray run -test)..."
   if ! xray run -test -config "${XRAY_CONFIG_FILE}"; then
     printf '%s\n' "=== КОНФИГ НЕ ПРОШЁЛ ВАЛИДАЦИЮ! ===" >&2
-    printf '%s\n' "Проверь логи ошибки выше." >&2
     exit 1
   fi
 
@@ -237,6 +236,8 @@ main() {
   validate_and_restart
 
   print_final_info "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${SHORT_ID}" "${VLESS_URL}"
+
+  printf '%s\n' "=== Установка завершена. Лог сохранён: ${LOG_FILE} ==="
 }
 
 main "$@"
