@@ -64,6 +64,25 @@ install_xray() {
   printf '%s\n' "Xray установлен (версия: $(xray version 2>&1 | head -n1 || echo unknown))"
 }
 
+get_server_ip() {
+  local ip
+  # Пробуем несколько надёжных источников
+  ip=$(curl -fsSL --max-time 8 https://ifconfig.me 2>/dev/null || true)
+  if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    ip=$(curl -fsSL --max-time 8 https://api.ipify.org 2>/dev/null || true)
+  fi
+  if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    ip=$(curl -fsSL --max-time 8 https://ipinfo.io/ip 2>/dev/null | tr -d ' \n' || true)
+  fi
+  if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "Не удалось автоматически определить публичный IP. Используем DEST_HOST." >&2
+    echo "${DEST_HOST}"
+  else
+    printf '%s\n' "Определён публичный IP сервера: ${ip}" >&2
+    echo "${ip}"
+  fi
+}
+
 gen_uuid() {
   xray uuid | tr -d '\r'
 }
@@ -71,12 +90,10 @@ gen_uuid() {
 gen_x25519() {
   local out private_key public_key
   out="$(xray x25519 2>&1)"
-
   printf '%s\n' "=== RAW x25519 OUTPUT ===" >&2
   printf '%s\n' "$out" >&2
   printf '%s\n' "=== END RAW ===" >&2
 
-  # Универсальный парсинг для всех версий Xray
   private_key=$(echo "$out" | grep -oP '(?i)(PrivateKey|Private key):\s*\K\S+' | head -n1 || true)
   public_key=$(echo "$out" | grep -oP '(?i)(Password \(PublicKey\)|Password|Public key):\s*\K\S+' | head -n1 || true)
 
@@ -84,7 +101,6 @@ gen_x25519() {
     printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
     exit 1
   fi
-
   printf '%s;%s\n' "$private_key" "$public_key"
 }
 
@@ -96,13 +112,11 @@ write_config() {
   local uuid="$1"
   local private_key="$2"
   local short_id="$3"
-
   mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_LOG_DIR}"
   touch "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
   chmod 644 "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
   chmod 700 "${XRAY_CONFIG_DIR}"
   chmod 600 "${XRAY_LOG_DIR}"/*.log 2>/dev/null || true
-
   cat > "${XRAY_CONFIG_FILE}" <<'EOF'
 {
   "log": {
@@ -149,7 +163,6 @@ write_config() {
   }
 }
 EOF
-
   sed -i "s/PORT_PLACEHOLDER/${PORT}/g" "${XRAY_CONFIG_FILE}"
   sed -i "s|UUID_PLACEHOLDER|${uuid}|g" "${XRAY_CONFIG_FILE}"
   sed -i "s|PATH_PLACEHOLDER|${PATH_NAME}|g" "${XRAY_CONFIG_FILE}"
@@ -157,7 +170,6 @@ EOF
   sed -i "s|SNI_PLACEHOLDER|${SNI}|g" "${XRAY_CONFIG_FILE}"
   sed -i "s|PRIVATEKEY_PLACEHOLDER|${private_key}|g" "${XRAY_CONFIG_FILE}"
   sed -i "s|SHORTID_PLACEHOLDER|${short_id}|g" "${XRAY_CONFIG_FILE}"
-
   chmod 600 "${XRAY_CONFIG_FILE}"
   printf '%s\n' "Конфиг успешно записан: ${XRAY_CONFIG_FILE} (размер: $(wc -c < "${XRAY_CONFIG_FILE}") байт)"
 }
@@ -179,9 +191,7 @@ validate_and_restart() {
     printf '%s\n' "systemd unit xray.service не найден!" >&2
     return 1
   fi
-
   systemctl enable xray --now >/dev/null 2>&1 || true
-
   printf '%s\n' "Выполняется проверка конфига (xray run -test)..."
   if xray run -test -config "${XRAY_CONFIG_FILE}"; then
     printf '%s\n' "Конфиг валидный. Перезапускаем Xray..."
@@ -206,9 +216,7 @@ print_final_info() {
   local public_key="$3"
   local short_id="$4"
   local vless_url="$5"
-
   print_config
-
   printf '%s\n' "=== ИТОГОВАЯ ИНФОРМАЦИЯ VPN СЕРВЕРА ==="
   printf '%s\n' "Готово."
   printf '%s\n' "UUID: ${uuid}"
@@ -218,7 +226,7 @@ print_final_info() {
   printf '%s\n' "Config: ${XRAY_CONFIG_FILE}"
   printf '%s\n' "Link:"
   printf '%s\n' "${vless_url}"
-  printf '\nПроверка:\n  systemctl status xray --no-pager\n  journalctl -u xray -e --no-pager\n'
+  printf '\nПроверка:\n systemctl status xray --no-pager\n journalctl -u xray -e --no-pager\n'
   printf '%s\n' "=== Полный лог: ${LOG_FILE} ==="
 }
 
@@ -233,15 +241,13 @@ main() {
   PUBLIC_KEY="${KEY_PAIR##*;}"
   SHORT_ID="$(gen_short_id)"
 
-  VLESS_URL="vless://${UUID}@${DEST_HOST}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=%2F${PATH_NAME}&mode=stream-one#${TAG}"
+  SERVER_IP="$(get_server_ip)"
+  VLESS_URL="vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=%2F${PATH_NAME}&mode=stream-one#${TAG}"
 
   write_config "${UUID}" "${PRIVATE_KEY}" "${SHORT_ID}"
   open_firewall
-
   validate_and_restart || printf '%s\n' "Валидация конфига не прошла, но продолжаем вывод результата..."
-
   print_final_info "${UUID}" "${PRIVATE_KEY}" "${PUBLIC_KEY}" "${SHORT_ID}" "${VLESS_URL}"
-
   printf '%s\n' "=== Установка завершена. Лог сохранён: ${LOG_FILE} ==="
 }
 
