@@ -38,8 +38,12 @@ install_deps() {
   printf '%s\n' "Установка зависимостей..."
   apt-get update -y
   apt-get install -y curl unzip openssl ca-certificates ufw || true
-  # iptables-persistent часто ломается — устанавливаем мягко
-  apt-get install -y iptables-persistent 2>/dev/null || true
+
+  # iptables-persistent часто конфликтует с ufw на Ubuntu 24
+  # ставим только если ufw по факту не доступен
+  if ! command -v ufw >/dev/null 2>&1; then
+    apt-get install -y iptables-persistent 2>/dev/null || true
+  fi
 }
 
 download_install_script() {
@@ -227,17 +231,34 @@ print_config() {
 
 validate_and_restart() {
   systemctl daemon-reload || true
+
   if ! systemctl list-unit-files | grep -q 'xray'; then
     printf '%s\n' "systemd unit xray.service не найден! Пытаемся исправить..." >&2
     systemctl enable xray.service --now 2>/dev/null || true
   fi
+
   systemctl enable xray --now >/dev/null 2>&1 || true
   printf '%s\n' "Выполняется проверка конфига (xray run -test)..."
+
   if xray run -test -config "${XRAY_CONFIG_FILE}"; then
     printf '%s\n' "Конфиг валидный. Перезапускаем Xray..."
     systemctl restart xray
-    printf '%s\n' "Xray успешно перезапущен."
-    return 0
+    sleep 2
+
+    if systemctl is-active --quiet xray; then
+      if ss -ltn "( sport = :${PORT} )" 2>/dev/null | grep -q ":${PORT}"; then
+        printf '%s\n' "Xray успешно перезапущен и слушает порт ${PORT}."
+        return 0
+      else
+        printf '%s\n' "Xray запущен, но не слушает порт ${PORT}." >&2
+        journalctl -u xray -n 50 --no-pager >&2 || true
+        return 1
+      fi
+    else
+      printf '%s\n' "Xray не поднялся после рестарта." >&2
+      journalctl -u xray -n 50 --no-pager >&2 || true
+      return 1
+    fi
   else
     printf '%s\n' "=== КОНФИГ НЕ ПРОШЁЛ ВАЛИДАЦИЮ! ===" >&2
     return 1
@@ -245,17 +266,29 @@ validate_and_restart() {
 }
 
 open_firewall() {
-  ufw allow 22/tcp || true
-  ufw allow "${PORT}/tcp" || true
-  ufw --force enable || true
-  iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
-  iptables -I INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
-  if command -v netfilter-persistent >/dev/null 2>&1; then
-    netfilter-persistent save 2>/dev/null || true
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow 22/tcp || true
+    ufw allow "${PORT}/tcp" || true
+    ufw --force enable || true
   else
-    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    printf '%s\n' "ufw отсутствует, применяю только iptables..." >&2
   fi
-  printf '%s\n' "Порты открыты через ufw + iptables: 22 и ${PORT}"
+
+  if command -v iptables >/dev/null 2>&1; then
+    iptables -C INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || \
+      iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+
+    iptables -C INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || \
+      iptables -I INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+      netfilter-persistent save 2>/dev/null || true
+    elif command -v iptables-save >/dev/null 2>&1; then
+      iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    fi
+  fi
+
+  printf '%s\n' "Порты открыты через доступные средства: 22 и ${PORT}"
 }
 
 print_final_info() {
