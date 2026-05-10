@@ -104,39 +104,17 @@ gen_x25519() {
   printf '%s\n' "$out" >&2
   printf '%s\n' "=== END RAW ===" >&2
 
-  private_key=$(
-    printf '%s\n' "$out" | awk '
-      /PrivateKey:/ {
-        line = $0
-        sub(/^.*PrivateKey:[[:space:]]*/, "", line)
-        gsub(/[[:space:]]+/, "", line)
-        print line
-        exit
-      }
-    '
-  )
+  private_key="$(
+    printf '%s\n' "$out" |
+      awk -F': ' '/^PrivateKey:/ {print $2; exit}' |
+      tr -cd 'A-Za-z0-9_-'
+  )"
 
-  public_key=$(
-    printf '%s\n' "$out" | awk '
-      /Password[[:space:]]*\(PublicKey\):/ {
-        line = $0
-        sub(/^.*Password[[:space:]]*\(PublicKey\):[[:space:]]*/, "", line)
-        gsub(/[[:space:]]+/, "", line)
-        print line
-        exit
-      }
-      /Public[[:space:]]*Key:/ {
-        line = $0
-        sub(/^.*Public[[:space:]]*Key:[[:space:]]*/, "", line)
-        gsub(/[[:space:]]+/, "", line)
-        print line
-        exit
-      }
-    '
-  )
-
-  private_key="$(printf '%s' "$private_key" | tr -d ' \n\r\t')"
-  public_key="$(printf '%s' "$public_key" | tr -d ' \n\r\t')"
+  public_key="$(
+    printf '%s\n' "$out" |
+      awk -F': ' '/^Password \(PublicKey\):/ {print $2; exit}' |
+      tr -cd 'A-Za-z0-9_-'
+  )"
 
   if [[ -z "$private_key" || -z "$public_key" ]]; then
     printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
