@@ -37,7 +37,9 @@ install_deps() {
   export DEBIAN_FRONTEND=noninteractive
   printf '%s\n' "Установка зависимостей..."
   apt-get update -y
-  apt-get install -y curl unzip openssl ca-certificates ufw iptables-persistent || true
+  apt-get install -y curl unzip openssl ca-certificates ufw || true
+  # iptables-persistent часто ломается — устанавливаем мягко
+  apt-get install -y iptables-persistent 2>/dev/null || true
 }
 
 download_install_script() {
@@ -97,11 +99,9 @@ gen_x25519() {
   printf '%s\n' "$out" >&2
   printf '%s\n' "=== END RAW ===" >&2
 
-  # Максимально агрессивный и надёжный парсинг
   private_key=$(echo "$out" | grep -oP '(?i)(PrivateKey|Private key):\s*\K[A-Za-z0-9+/=]+' | head -n1 | tr -d ' \n\r\t' || true)
   public_key=$(echo "$out" | grep -oP '(?i)(Password \(PublicKey\)|Password|Public key):\s*\K[A-Za-z0-9+/=]+' | head -n1 | tr -d ' \n\r\t' || true)
 
-  # Финальная очистка
   private_key=$(echo -n "$private_key" | tr -dc 'A-Za-z0-9+/=')
   public_key=$(echo -n "$public_key" | tr -dc 'A-Za-z0-9+/=')
 
@@ -109,10 +109,8 @@ gen_x25519() {
     printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
     exit 1
   fi
-
   printf '%s\n' "Извлечён PrivateKey: ${private_key}" >&2
   printf '%s\n' "Извлечён PublicKey: ${public_key}" >&2
-
   printf '%s;%s\n' "$private_key" "$public_key"
 }
 
@@ -199,9 +197,9 @@ print_config() {
 
 validate_and_restart() {
   systemctl daemon-reload || true
-  if ! systemctl list-unit-files | grep -q '^xray\.service'; then
-    printf '%s\n' "systemd unit xray.service не найден!" >&2
-    return 1
+  if ! systemctl list-unit-files | grep -q 'xray'; then
+    printf '%s\n' "systemd unit xray.service не найден! Пытаемся исправить..." >&2
+    systemctl enable xray.service --now 2>/dev/null || true
   fi
   systemctl enable xray --now >/dev/null 2>&1 || true
   printf '%s\n' "Выполняется проверка конфига (xray run -test)..."
