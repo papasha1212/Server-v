@@ -218,7 +218,14 @@ write_config() {
 }
 EOF
 
+  chown -R nobody:nogroup "${XRAY_CONFIG_DIR}" "${XRAY_LOG_DIR}" 2>/dev/null || \
+  chown -R nobody:nobody "${XRAY_CONFIG_DIR}" "${XRAY_LOG_DIR}" 2>/dev/null || true
+
+  chmod 700 "${XRAY_CONFIG_DIR}"
+  chmod 700 "${XRAY_LOG_DIR}"
   chmod 600 "${XRAY_CONFIG_FILE}"
+  chmod 600 "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log" 2>/dev/null || true
+
   printf '%s\n' "Конфиг успешно записан: ${XRAY_CONFIG_FILE} (размер: $(wc -c < "${XRAY_CONFIG_FILE}") байт)"
 }
 
