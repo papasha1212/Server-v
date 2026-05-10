@@ -4,9 +4,9 @@ set -euo pipefail
 # ====== Параметры по умолчанию ======
 PORT="${PORT:-443}"
 PATH_NAME="${PATH_NAME:-vpn}"
-DEST_HOST="${DEST_HOST:-speed.cloudflare.com}"
+DEST_HOST="${DEST_HOST:-yandex.ru}"
 DEST_PORT="${DEST_PORT:-443}"
-SNI="${SNI:-speed.cloudflare.com}"
+SNI="${SNI:-yandex.ru}"
 TAG="${TAG:-VPN}"
 LOG_LEVEL="${LOG_LEVEL:-warning}"
 
