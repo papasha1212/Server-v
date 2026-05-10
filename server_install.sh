@@ -95,20 +95,31 @@ gen_uuid() {
 gen_x25519() {
   local out private_key public_key
   out="$(xray x25519 2>&1)"
+
   printf '%s\n' "=== RAW x25519 OUTPUT ===" >&2
   printf '%s\n' "$out" >&2
   printf '%s\n' "=== END RAW ===" >&2
 
-  private_key=$(echo "$out" | grep -oP '(?i)(PrivateKey|Private key):\s*\K[A-Za-z0-9+/=]+' | head -n1 | tr -d ' \n\r\t' || true)
-  public_key=$(echo "$out" | grep -oP '(?i)(Password \(PublicKey\)|Password|Public key):\s*\K[A-Za-z0-9+/=]+' | head -n1 | tr -d ' \n\r\t' || true)
+  private_key=$(
+    printf '%s\n' "$out" |
+      sed -nE 's/^[[:space:]]*Private[[:space:]]+[Kk]ey:[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*$/\1/p' |
+      head -n1
+  )
 
-  private_key=$(echo -n "$private_key" | tr -dc 'A-Za-z0-9+/=')
-  public_key=$(echo -n "$public_key" | tr -dc 'A-Za-z0-9+/=')
+  public_key=$(
+    printf '%s\n' "$out" |
+      sed -nE 's/^[[:space:]]*(Password[[:space:]]*\(PublicKey\)|Public[[:space:]]+[Kk]ey):[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*$/\2/p' |
+      head -n1
+  )
+
+  private_key="$(printf '%s' "$private_key" | tr -d ' \n\r\t')"
+  public_key="$(printf '%s' "$public_key" | tr -d ' \n\r\t')"
 
   if [[ -z "$private_key" || -z "$public_key" ]]; then
     printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
     exit 1
   fi
+
   printf '%s\n' "Извлечён PrivateKey: ${private_key}" >&2
   printf '%s\n' "Извлечён PublicKey: ${public_key}" >&2
   printf '%s;%s\n' "$private_key" "$public_key"
