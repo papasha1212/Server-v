@@ -165,9 +165,8 @@ write_config() {
         "network": "xhttp",
         "security": "reality",
         "xhttpSettings": {
-          "mode": "stream-one",
-          "path": "/${PATH_NAME}",
-          "host": "${SNI}"
+         "mode": "auto",
+         "path": "/${PATH_NAME}"
         },
         "realitySettings": {
           "dest": "${DEST_HOST}:${DEST_PORT}",
