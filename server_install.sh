@@ -37,7 +37,7 @@ install_deps() {
   export DEBIAN_FRONTEND=noninteractive
   printf '%s\n' "Установка зависимостей..."
   apt-get update -y
-  apt-get install -y curl unzip openssl ca-certificates ufw
+  apt-get install -y curl unzip openssl ca-certificates ufw iptables-persistent || true
 }
 
 download_install_script() {
@@ -97,11 +97,9 @@ gen_x25519() {
   printf '%s\n' "$out" >&2
   printf '%s\n' "=== END RAW ===" >&2
 
-  # Улучшенная очистка (убираем всё лишнее)
   private_key=$(echo "$out" | grep -oP '(?i)(PrivateKey|Private key):\s*\K\S+' | head -n1 | tr -d ' \n' || true)
   public_key=$(echo "$out" | grep -oP '(?i)(Password \(PublicKey\)|Password|Public key):\s*\K\S+' | head -n1 | tr -d ' \n' || true)
 
-  # Дополнительная жёсткая очистка base64
   private_key=$(echo -n "$private_key" | tr -d ' \n\r\t')
   public_key=$(echo -n "$public_key" | tr -d ' \n\r\t')
 
@@ -109,7 +107,6 @@ gen_x25519() {
     printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
     exit 1
   fi
-
   printf '%s;%s\n' "$private_key" "$public_key"
 }
 
@@ -214,9 +211,23 @@ validate_and_restart() {
 }
 
 open_firewall() {
+  # ufw (основной)
   ufw allow 22/tcp || true
   ufw allow "${PORT}/tcp" || true
   ufw --force enable || true
+
+  # iptables (дополнительно, как ты просил)
+  iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+  iptables -I INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+  
+  # Сохранение правил iptables
+  if command -v netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save 2>/dev/null || true
+  elif command -v iptables-save >/dev/null 2>&1; then
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+  fi
+
+  printf '%s\n' "Порты открыты: 22 и ${PORT} (ufw + iptables)"
 }
 
 print_final_info() {
