@@ -30,7 +30,6 @@ need_root() {
 }
 
 gen_random_port() {
-  # Генерируем порт в диапазоне 30000-59999 (эпhemeral + относительно безопасный)
   shuf -i 30000-59999 -n 1
 }
 
@@ -98,13 +97,19 @@ gen_x25519() {
   printf '%s\n' "$out" >&2
   printf '%s\n' "=== END RAW ===" >&2
 
-  private_key=$(echo "$out" | grep -oP '(?i)(PrivateKey|Private key):\s*\K\S+' | head -n1 || true)
-  public_key=$(echo "$out" | grep -oP '(?i)(Password \(PublicKey\)|Password|Public key):\s*\K\S+' | head -n1 || true)
+  # Улучшенная очистка (убираем всё лишнее)
+  private_key=$(echo "$out" | grep -oP '(?i)(PrivateKey|Private key):\s*\K\S+' | head -n1 | tr -d ' \n' || true)
+  public_key=$(echo "$out" | grep -oP '(?i)(Password \(PublicKey\)|Password|Public key):\s*\K\S+' | head -n1 | tr -d ' \n' || true)
+
+  # Дополнительная жёсткая очистка base64
+  private_key=$(echo -n "$private_key" | tr -d ' \n\r\t')
+  public_key=$(echo -n "$public_key" | tr -d ' \n\r\t')
 
   if [[ -z "$private_key" || -z "$public_key" ]]; then
     printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
     exit 1
   fi
+
   printf '%s;%s\n' "$private_key" "$public_key"
 }
 
@@ -239,7 +244,6 @@ main() {
   install_deps
   install_xray
 
-  # Автогенерация порта, если не задан явно
   if [[ "${PORT}" -eq 443 ]]; then
     PORT="$(gen_random_port)"
     printf '%s\n' "Сгенерирован случайный порт: ${PORT}"
