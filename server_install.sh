@@ -211,23 +211,22 @@ validate_and_restart() {
 }
 
 open_firewall() {
-  # ufw (основной)
   ufw allow 22/tcp || true
   ufw allow "${PORT}/tcp" || true
   ufw --force enable || true
 
-  # iptables (дополнительно, как ты просил)
+  # iptables (по твоему запросу)
   iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
   iptables -I INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
-  
-  # Сохранение правил iptables
+
+  # Сохранение правил
   if command -v netfilter-persistent >/dev/null 2>&1; then
     netfilter-persistent save 2>/dev/null || true
-  elif command -v iptables-save >/dev/null 2>&1; then
+  else
     iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
   fi
 
-  printf '%s\n' "Порты открыты: 22 и ${PORT} (ufw + iptables)"
+  printf '%s\n' "Порты открыты через ufw + iptables: 22 и ${PORT}"
 }
 
 print_final_info() {
