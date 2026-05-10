@@ -156,24 +156,31 @@ write_config() {
   local uuid="$1"
   local private_key="$2"
   local short_id="$3"
+
   mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_LOG_DIR}"
   touch "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
   chmod 644 "${XRAY_LOG_DIR}/access.log" "${XRAY_LOG_DIR}/error.log"
   chmod 700 "${XRAY_CONFIG_DIR}"
   chmod 600 "${XRAY_LOG_DIR}"/*.log 2>/dev/null || true
-  cat > "${XRAY_CONFIG_FILE}" <<'EOF'
+
+  cat > "${XRAY_CONFIG_FILE}" <<EOF
 {
   "log": {
-    "loglevel": "warning",
+    "loglevel": "${LOG_LEVEL}",
     "access": "/var/log/xray/access.log",
     "error": "/var/log/xray/error.log"
   },
   "inbounds": [
     {
-      "port": PORT_PLACEHOLDER,
+      "port": ${PORT},
       "protocol": "vless",
       "settings": {
-        "clients": [{ "id": "UUID_PLACEHOLDER", "level": 0 }],
+        "clients": [
+          {
+            "id": "${uuid}",
+            "level": 0
+          }
+        ],
         "decryption": "none"
       },
       "streamSettings": {
@@ -181,14 +188,14 @@ write_config() {
         "security": "reality",
         "xhttpSettings": {
           "mode": "stream-one",
-          "path": "/PATH_PLACEHOLDER",
+          "path": "/${PATH_NAME}",
           "host": "${SNI}"
         },
         "realitySettings": {
-          "dest": "DEST_PLACEHOLDER",
-          "serverNames": ["SNI_PLACEHOLDER"],
-          "privateKey": "PRIVATEKEY_PLACEHOLDER",
-          "shortIds": ["SHORTID_PLACEHOLDER"]
+          "dest": "${DEST_HOST}:${DEST_PORT}",
+          "serverNames": ["${SNI}"],
+          "privateKey": "${private_key}",
+          "shortIds": ["${short_id}"]
         }
       },
       "sniffing": {
@@ -204,17 +211,13 @@ write_config() {
   ],
   "routing": {
     "domainStrategy": "AsIs",
-    "rules": [{ "ip": ["geoip:private"], "outboundTag": "blocked" }]
+    "rules": [
+      { "ip": ["geoip:private"], "outboundTag": "blocked" }
+    ]
   }
 }
 EOF
-  sed -i "s/PORT_PLACEHOLDER/${PORT}/g" "${XRAY_CONFIG_FILE}"
-  sed -i "s|UUID_PLACEHOLDER|${uuid}|g" "${XRAY_CONFIG_FILE}"
-  sed -i "s|PATH_PLACEHOLDER|${PATH_NAME}|g" "${XRAY_CONFIG_FILE}"
-  sed -i "s|DEST_PLACEHOLDER|${DEST_HOST}:${DEST_PORT}|g" "${XRAY_CONFIG_FILE}"
-  sed -i "s|SNI_PLACEHOLDER|${SNI}|g" "${XRAY_CONFIG_FILE}"
-  sed -i "s|PRIVATEKEY_PLACEHOLDER|${private_key}|g" "${XRAY_CONFIG_FILE}"
-  sed -i "s|SHORTID_PLACEHOLDER|${short_id}|g" "${XRAY_CONFIG_FILE}"
+
   chmod 600 "${XRAY_CONFIG_FILE}"
   printf '%s\n' "Конфиг успешно записан: ${XRAY_CONFIG_FILE} (размер: $(wc -c < "${XRAY_CONFIG_FILE}") байт)"
 }
@@ -298,6 +301,7 @@ open_firewall() {
       netfilter-persistent save >/dev/null 2>&1 || true
       printf '%s\n' "Правила сохранены через netfilter-persistent"
     elif command -v iptables-save >/dev/null 2>&1; then
+      mkdir -p /etc/iptables
       iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
       printf '%s\n' "Правила сохранены через iptables-save"
     fi
@@ -314,7 +318,7 @@ open_firewall() {
   if ss -ltn "( sport = :${PORT} )" 2>/dev/null | grep -q ":${PORT}"; then
     printf '%s\n' "✅ Порт ${PORT} успешно открыт и слушается."
   else
-    printf '%s\n' "⚠️  Порт ${PORT} слушается Xray, но могут быть проблемы с firewall." >&2
+    printf '%s\n' "⚠️ Порт ${PORT} слушается Xray, но могут быть проблемы с firewall." >&2
   fi
 
   printf '%s\n' "Порты открыты через доступные средства: 22 и ${PORT}"
