@@ -29,6 +29,11 @@ need_root() {
   fi
 }
 
+gen_random_port() {
+  # Генерируем порт в диапазоне 30000-59999 (эпhemeral + относительно безопасный)
+  shuf -i 30000-59999 -n 1
+}
+
 install_deps() {
   export DEBIAN_FRONTEND=noninteractive
   printf '%s\n' "Установка зависимостей..."
@@ -66,7 +71,6 @@ install_xray() {
 
 get_server_ip() {
   local ip
-  # Пробуем несколько надёжных источников
   ip=$(curl -fsSL --max-time 8 https://ifconfig.me 2>/dev/null || true)
   if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     ip=$(curl -fsSL --max-time 8 https://api.ipify.org 2>/dev/null || true)
@@ -234,6 +238,12 @@ main() {
   need_root
   install_deps
   install_xray
+
+  # Автогенерация порта, если не задан явно
+  if [[ "${PORT}" -eq 443 ]]; then
+    PORT="$(gen_random_port)"
+    printf '%s\n' "Сгенерирован случайный порт: ${PORT}"
+  fi
 
   UUID="$(gen_uuid)"
   KEY_PAIR="$(gen_x25519)"
