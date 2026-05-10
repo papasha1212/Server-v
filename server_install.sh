@@ -181,7 +181,8 @@ write_config() {
         "security": "reality",
         "xhttpSettings": {
           "mode": "stream-one",
-          "path": "/PATH_PLACEHOLDER"
+          "path": "/PATH_PLACEHOLDER",
+          "host": "${SNI}"
         },
         "realitySettings": {
           "dest": "DEST_PLACEHOLDER",
