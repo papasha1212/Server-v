@@ -72,21 +72,16 @@ gen_x25519() {
   local out private_key public_key
   out="$(xray x25519 2>&1)"
 
-  # Новый формат Xray v25.3.6+ (PrivateKey / Password)
-  private_key="$(echo "$out" | grep -i 'PrivateKey:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
-  public_key="$(echo "$out" | grep -iE 'Password:|Public key:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
+  printf '%s\n' "=== RAW x25519 OUTPUT ===" >&2
+  printf '%s\n' "$out" >&2
+  printf '%s\n' "=== END RAW ===" >&2
 
-  # Старый формат (fallback)
-  if [[ -z "$private_key" ]]; then
-    private_key="$(echo "$out" | grep -i 'Private key:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
-  fi
-  if [[ -z "$public_key" ]]; then
-    public_key="$(echo "$out" | grep -i 'Public key:' | awk -F': ' '{print $2}' | tr -d '\r ' || true)"
-  fi
+  # Универсальный парсинг для всех версий Xray
+  private_key=$(echo "$out" | grep -oP '(?i)(PrivateKey|Private key):\s*\K\S+' | head -n1 || true)
+  public_key=$(echo "$out" | grep -oP '(?i)(Password \(PublicKey\)|Password|Public key):\s*\K\S+' | head -n1 || true)
 
-  if [[ -z "${private_key}" || -z "${public_key}" ]]; then
-    printf '%s\n' "Не удалось распарсить xray x25519 (новый формат?):" >&2
-    printf '%s\n' "$out" >&2
+  if [[ -z "$private_key" || -z "$public_key" ]]; then
+    printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
     exit 1
   fi
 
