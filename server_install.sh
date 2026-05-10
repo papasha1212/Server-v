@@ -269,6 +269,7 @@ open_firewall() {
   if command -v ufw >/dev/null 2>&1; then
     ufw allow 22/tcp || true
     ufw allow "${PORT}/tcp" || true
+    ufw allow "${PORT}/udp" || true
     ufw --force enable || true
   else
     printf '%s\n' "ufw отсутствует, применяю только iptables..." >&2
