@@ -101,15 +101,34 @@ gen_x25519() {
   printf '%s\n' "=== END RAW ===" >&2
 
   private_key=$(
-    printf '%s\n' "$out" |
-      sed -nE 's/^[[:space:]]*Private[[:space:]]+[Kk]ey:[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*$/\1/p' |
-      head -n1
+    printf '%s\n' "$out" | awk '
+      /PrivateKey:/ {
+        line = $0
+        sub(/^.*PrivateKey:[[:space:]]*/, "", line)
+        gsub(/[[:space:]]+/, "", line)
+        print line
+        exit
+      }
+    '
   )
 
   public_key=$(
-    printf '%s\n' "$out" |
-      sed -nE 's/^[[:space:]]*(Password[[:space:]]*\(PublicKey\)|Public[[:space:]]+[Kk]ey):[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*$/\2/p' |
-      head -n1
+    printf '%s\n' "$out" | awk '
+      /Password[[:space:]]*\(PublicKey\):/ {
+        line = $0
+        sub(/^.*Password[[:space:]]*\(PublicKey\):[[:space:]]*/, "", line)
+        gsub(/[[:space:]]+/, "", line)
+        print line
+        exit
+      }
+      /Public[[:space:]]*Key:/ {
+        line = $0
+        sub(/^.*Public[[:space:]]*Key:[[:space:]]*/, "", line)
+        gsub(/[[:space:]]+/, "", line)
+        print line
+        exit
+      }
+    '
   )
 
   private_key="$(printf '%s' "$private_key" | tr -d ' \n\r\t')"
