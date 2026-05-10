@@ -175,7 +175,7 @@ write_config() {
       "port": ${PORT},
       "protocol": "vless",
       "settings": {
-        "clients": [
+        "users": [
           {
             "id": "${uuid}",
             "level": 0
