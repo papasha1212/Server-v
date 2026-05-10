@@ -100,29 +100,25 @@ gen_x25519() {
   local out private_key public_key
   out="$(xray x25519 2>&1)"
 
-  printf '%s\n' "=== RAW x25519 OUTPUT ===" >&2
-  printf '%s\n' "$out" >&2
-  printf '%s\n' "=== END RAW ===" >&2
-
   private_key="$(
     printf '%s\n' "$out" |
-      awk -F': ' '/^PrivateKey:/ {print $2; exit}' |
-      tr -cd 'A-Za-z0-9_-'
+      awk '/^Private key:/ {print $NF; exit}'
   )"
 
   public_key="$(
     printf '%s\n' "$out" |
-      awk -F': ' '/^Password \(PublicKey\):/ {print $2; exit}' |
-      tr -cd 'A-Za-z0-9_-'
+      awk '/^Public key:/ {print $NF; exit}'
   )"
 
   if [[ -z "$private_key" || -z "$public_key" ]]; then
     printf '%s\n' "КРИТИЧЕСКАЯ ОШИБКА ПАРСИНГА x25519!" >&2
+    printf '%s\n' "RAW OUTPUT:" >&2
+    printf '%s\n' "$out" >&2
     exit 1
   fi
 
-  printf '%s\n' "Извлечён PrivateKey: ${private_key}" >&2
-  printf '%s\n' "Извлечён PublicKey: ${public_key}" >&2
+  printf '%s\n' "PrivateKey: ${private_key}" >&2
+  printf '%s\n' "PublicKey:  ${public_key}" >&2
   printf '%s;%s\n' "$private_key" "$public_key"
 }
 
