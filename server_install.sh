@@ -267,27 +267,54 @@ validate_and_restart() {
 }
 
 open_firewall() {
+  printf '%s\n' "Открываем порт ${PORT} в firewall..."
+
+  # === UFW (предпочтительный метод на Ubuntu/Debian) ===
   if command -v ufw >/dev/null 2>&1; then
+    printf '%s\n' "Используем ufw..."
     ufw allow 22/tcp || true
-    ufw allow "${PORT}/tcp" || true
-    ufw allow "${PORT}/udp" || true
+    ufw allow "${PORT}/tcp" comment "Xray VLESS Reality" || true
+    ufw allow "${PORT}/udp" comment "Xray VLESS Reality" || true
     ufw --force enable || true
+    printf '%s\n' "ufw: правила добавлены для порта ${PORT}"
   else
-    printf '%s\n' "ufw отсутствует, применяю только iptables..." >&2
+    printf '%s\n' "ufw не найден, переходим к iptables/nftables..." >&2
   fi
 
+  # === iptables + persistence ===
   if command -v iptables >/dev/null 2>&1; then
+    printf '%s\n' "Применяем iptables правила..."
+
+    # TCP
     iptables -C INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || \
-      iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+      iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT || true
 
+    # UDP
     iptables -C INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || \
-      iptables -I INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+      iptables -I INPUT -p udp --dport "${PORT}" -j ACCEPT || true
 
+    # Сохранение правил
     if command -v netfilter-persistent >/dev/null 2>&1; then
-      netfilter-persistent save 2>/dev/null || true
+      netfilter-persistent save >/dev/null 2>&1 || true
+      printf '%s\n' "Правила сохранены через netfilter-persistent"
     elif command -v iptables-save >/dev/null 2>&1; then
       iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+      printf '%s\n' "Правила сохранены через iptables-save"
     fi
+  fi
+
+  # === nftables (новые системы) — дополнительная страховка ===
+  if command -v nft >/dev/null 2>&1; then
+    printf '%s\n' "Проверяем nftables..."
+    nft add rule inet filter input tcp dport "${PORT}" accept 2>/dev/null || true
+    nft add rule inet filter input udp dport "${PORT}" accept 2>/dev/null || true
+  fi
+
+  # Финальная проверка
+  if ss -ltn "( sport = :${PORT} )" 2>/dev/null | grep -q ":${PORT}"; then
+    printf '%s\n' "✅ Порт ${PORT} успешно открыт и слушается."
+  else
+    printf '%s\n' "⚠️  Порт ${PORT} слушается Xray, но могут быть проблемы с firewall." >&2
   fi
 
   printf '%s\n' "Порты открыты через доступные средства: 22 и ${PORT}"
